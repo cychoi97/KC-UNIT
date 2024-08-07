@@ -90,10 +90,10 @@ class Discriminator(nn.Module):
         return out_src, out_cls.view(out_cls.size(0), out_cls.size(1))
 
 
-class Generator_GGCL(nn.Module):
+class Generator_PG(nn.Module):
     """Generator network."""
     def __init__(self, conv_dim=64, c_dim=8, repeat_num=6):
-        super(Generator_GGCL, self).__init__()
+        super(Generator_PG, self).__init__()
         # Init layer
         self.init = nn.Sequential(
             nn.Conv2d(1+c_dim, conv_dim, kernel_size=7, stride=1, padding=3, bias=False),
@@ -157,13 +157,13 @@ class Generator_GGCL(nn.Module):
         enc_feature = down1
         dec_feature = up1
 
-        return out, enc_feature, dec_feature
+        return out, dec_feature
 
 
-class Discriminator_GGCL(nn.Module):
+class Discriminator_PG(nn.Module):
     """Discriminator network with U-Net for GGDR."""
     def __init__(self, image_size=512, conv_dim=32, c_dim=6, repeat_num=7):
-        super(Discriminator_GGCL, self).__init__()
+        super(Discriminator_PG, self).__init__()
         # Down-sampling layers
         self.init_down = nn.Sequential(
             spectral_norm(nn.Conv2d(1, conv_dim, kernel_size=4, stride=2, padding=1)),

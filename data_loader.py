@@ -97,7 +97,7 @@ class Dataset(Dataset):
             min = -1024.0
             max = 3071.0
 
-        img = self._resize(img)
+        # img = self._resize(img)
         img = self._clip_and_normalize(img, min, max)
         return img
 

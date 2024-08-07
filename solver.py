@@ -14,8 +14,8 @@ from skimage.metrics import structural_similarity
 from model import (
     Generator,
     Discriminator,
-    Generator_GGCL,
-    Discriminator_GGCL
+    Generator_PG,
+    Discriminator_PG
     )
 
 from torchvision.utils import save_image
@@ -160,14 +160,14 @@ class Solver(object):
                 self.D = Discriminator(self.image_size, self.d_conv_dim, self.c1_dim+self.c2_dim, self.d_repeat_num)
         else:
             if self.dataset in ['SIEMENS']:
-                self.G = Generator_GGCL(self.g_conv_dim, self.c1_dim, self.g_repeat_num)
-                self.D = Discriminator_GGCL(self.image_size, self.d_conv_dim, self.c1_dim, self.d_repeat_num)
+                self.G = Generator_PG(self.g_conv_dim, self.c1_dim, self.g_repeat_num)
+                self.D = Discriminator_PG(self.image_size, self.d_conv_dim, self.c1_dim, self.d_repeat_num)
             elif self.dataset in ['GE']:
-                self.G = Generator_GGCL(self.g_conv_dim, self.c2_dim, self.g_repeat_num)
-                self.D = Discriminator_GGCL(self.image_size, self.d_conv_dim, self.c2_dim, self.d_repeat_num)
+                self.G = Generator_PG(self.g_conv_dim, self.c2_dim, self.g_repeat_num)
+                self.D = Discriminator_PG(self.image_size, self.d_conv_dim, self.c2_dim, self.d_repeat_num)
             elif self.dataset in ['Both']:
-                self.G = Generator_GGCL(self.g_conv_dim, self.c1_dim+self.c2_dim+2, self.g_repeat_num)
-                self.D = Discriminator_GGCL(self.image_size, self.d_conv_dim, self.c1_dim+self.c2_dim, self.d_repeat_num)
+                self.G = Generator_PG(self.g_conv_dim, self.c1_dim+self.c2_dim+2, self.g_repeat_num)
+                self.D = Discriminator_PG(self.image_size, self.d_conv_dim, self.c1_dim+self.c2_dim, self.d_repeat_num)
 
         if self.multi_gpu_mode == 'DataParallel':
             print("Multi GPU model = DataParallel")
@@ -399,7 +399,7 @@ class Solver(object):
                 x_fake = self.G(x_real, c_trg)
                 out_src, _  = self.D(x_fake.detach())
             else:
-                x_fake, g_enc_feature, g_dec_feature = self.G(x_real, c_trg)
+                x_fake, g_out_feature = self.G(x_real, c_trg)
                 out_src, _, d_out_feature  = self.D(x_fake.detach())
             d_loss_fake = torch.mean(out_src)
 
@@ -412,15 +412,18 @@ class Solver(object):
                 out_src, _, _ = self.D(x_hat)
             d_loss_gp = self.gradient_penalty(out_src, x_hat)
 
-            # Compute loss for GGCL.
+            # Compute loss for Perceptual Guidance.
             d_loss = d_loss_real + d_loss_fake + self.lambda_cls * d_loss_cls + self.lambda_gp * d_loss_gp
             if self.use_feature:
                 if self.guide_type == 'ggdr':
-                    d_loss_ggcl = self.cosine_distance_loss(g_dec_feature, d_out_feature)
+                    d_loss_pg = self.cosine_distance_loss(g_out_feature, d_out_feature) * self.lambda_ggdr
                 elif self.guide_type == 'ggcl':
-                    d_loss_ggcl = self.PatchNCE_loss(g_dec_feature, d_out_feature)
-                    d_loss_ggdr = self.cosine_distance_loss(g_dec_feature, d_out_feature)
-                d_loss = d_loss #+ self.lambda_ggcl * d_loss_ggcl + self.lambda_ggdr * d_loss_ggdr
+                    d_loss_pg = self.PatchNCE_loss(g_out_feature, d_out_feature) * self.lambda_ggcl
+                elif self.guide_type == 'pg':
+                    d_loss_ggdr = self.cosine_distance_loss(g_out_feature, d_out_feature) * self.lambda_ggdr
+                    d_loss_ggcl = self.PatchNCE_loss(g_out_feature, d_out_feature) * self.lambda_ggcl
+                    d_loss_pg = d_loss_ggdr + d_loss_ggcl
+                d_loss = d_loss + d_loss_pg
 
             # Backward and optimize.
             self.reset_grad()
@@ -434,8 +437,7 @@ class Solver(object):
             loss['D/loss_cls'] = d_loss_cls.item()
             loss['D/loss_gp'] = d_loss_gp.item()
             if self.use_feature:
-                loss['D/loss_ggcl'] = d_loss_ggcl.item()
-                loss['D/loss_ggdr'] = d_loss_ggdr.item()
+                loss['D/loss_pg'] = d_loss_pg.item()
             
             # =================================================================================== #
             #                               3. Train the generator                                #
@@ -447,7 +449,7 @@ class Solver(object):
                     x_fake = self.G(x_real, c_trg)
                     out_src, out_cls = self.D(x_fake)
                 else:
-                    x_fake, _, _ = self.G(x_real, c_trg)
+                    x_fake, _ = self.G(x_real, c_trg)
                     out_src, out_cls, _ = self.D(x_fake)
                 g_loss_fake = - torch.mean(out_src)
                 g_loss_cls = self.classification_loss(out_cls, label_trg)
@@ -456,12 +458,11 @@ class Solver(object):
                 if not self.use_feature:
                     x_reconst = self.G(x_fake, c_org)
                 else:
-                    x_reconst, _, _ = self.G(x_fake, c_org)
+                    x_reconst, _ = self.G(x_fake, c_org)
                 g_loss_rec = torch.mean(torch.abs(x_real - x_reconst))
 
                 # Backward and optimize.
                 g_loss = g_loss_fake + self.lambda_rec * g_loss_rec + self.lambda_cls * g_loss_cls
-                # g_loss = g_loss_fake + self.lambda_cls * g_loss_cls
                 self.reset_grad()
                 g_loss.backward()
                 self.g_optimizer.step()
@@ -496,7 +497,7 @@ class Solver(object):
                         if not self.use_feature:
                             fake = self.G(x_fixed, c_fixed)
                         else:
-                            fake, _, _ = self.G(x_fixed, c_fixed)
+                            fake, _ = self.G(x_fixed, c_fixed)
                         x_fake_list.append(fake)
                     x_concat = torch.cat(x_fake_list, dim=3)
                     sample_path = os.path.join(self.sample_dir, f'{i+1}-images.png')
@@ -636,14 +637,18 @@ class Solver(object):
                     out_src, _, _ = self.D(x_hat)
                 d_loss_gp = self.gradient_penalty(out_src, x_hat)
 
-                # Compute loss for GGCL.
+                # Compute loss for Perceptual Guidance.
                 d_loss = d_loss_real + d_loss_fake + self.lambda_cls*d_loss_cls + self.lambda_gp*d_loss_gp
                 if self.use_feature:
                     if self.guide_type == 'ggdr':
-                        d_loss_ggcl = self.cosine_distance_loss(g_out_feature, d_out_feature)
+                        d_loss_pg = self.cosine_distance_loss(g_out_feature, d_out_feature) * self.lambda_ggdr
                     elif self.guide_type == 'ggcl':
-                        d_loss_ggcl = self.PatchNCE_loss(g_out_feature, d_out_feature)
-                    d_loss = d_loss + self.lambda_ggcl*d_loss_ggcl
+                        d_loss_pg = self.PatchNCE_loss(g_out_feature, d_out_feature) * self.lambda_ggcl
+                    elif self.guide_type == 'pg':
+                        d_loss_ggdr = self.cosine_distance_loss(g_out_feature, d_out_feature) * self.lambda_ggdr
+                        d_loss_ggcl = self.PatchNCE_loss(g_out_feature, d_out_feature) * self.lambda_ggcl
+                        d_loss_pg = d_loss_ggdr + d_loss_ggcl
+                    d_loss = d_loss + d_loss_pg
                 
                 # Backward and optimize.
                 self.reset_grad()
@@ -657,7 +662,7 @@ class Solver(object):
                 loss['D/loss_cls'] = d_loss_cls.item()
                 loss['D/loss_gp'] = d_loss_gp.item()
                 if self.use_feature:
-                    loss['D/loss_ggcl'] = d_loss_ggcl.item()
+                    loss['D/loss_pg'] = d_loss_pg.item()
             
                 # =================================================================================== #
                 #                               3. Train the generator                                #
@@ -782,7 +787,7 @@ class Solver(object):
                     if not self.use_feature:
                         fake = self.G(x_real, c_trg)
                     else:
-                        fake, _, _ = self.G(x_real, c_trg)
+                        fake, _ = self.G(x_real, c_trg)
                     x_fake_list.append(fake)
 
                     # save as dicom
@@ -832,7 +837,7 @@ class Solver(object):
                         if not self.use_feature:
                             fake = self.G(x_real, c_trg)
                         else:
-                            fake, _, _ = self.G(x_real, c_trg)
+                            fake, _ = self.G(x_real, c_trg)
                         x_fake_list.append(fake)
 
                         # Save as dicom
@@ -850,7 +855,7 @@ class Solver(object):
                         if not self.use_feature:
                             fake = self.G(x_real, c_trg)
                         else:
-                            fake, _, _ = self.G(x_real, c_trg)
+                            fake, _ = self.G(x_real, c_trg)
                         x_fake_list.append(fake)
 
                         # Save as dicom

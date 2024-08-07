@@ -30,13 +30,13 @@ def main(config):
     model_save_dir = os.path.join(config.save_path, 'models')
     sample_dir = os.path.join(config.save_path, 'samples')
     png_result_dir = os.path.join(config.save_path, 'results/png')
-    dcn_result_dir = os.path.join(config.save_path, 'results/dcm')
+    dcm_result_dir = os.path.join(config.save_path, 'results/dcm')
 
     os.makedirs(log_dir, exist_ok=True)
     os.makedirs(model_save_dir, exist_ok=True)
     os.makedirs(sample_dir, exist_ok=True)
     os.makedirs(png_result_dir, exist_ok=True)
-    os.makedirs(dcn_result_dir, exist_ok=True)
+    os.makedirs(dcm_result_dir, exist_ok=True)
 
     # Solver for training and testing.
     if config.mode == 'train':
@@ -96,9 +96,9 @@ if __name__ == '__main__':
     parser.add_argument('--lambda_gp', type=float, default=10, help='weight for gradient penalty')
     parser.add_argument('--lambda_ggcl', type=float, default=1, help='weight for ggcl loss')
     parser.add_argument('--lambda_ggdr', type=float, default=5, help='weight for ggdr loss')
-    parser.add_argument('--use_feature', action='store_true', help='If specified, use GGDR or GGCL')
-    parser.add_argument('--guide_type', type=str, default='ggcl',
-                        choices=['ggdr', 'ggcl'], help='choose between GGDR and GGCL')
+    parser.add_argument('--use_feature', action='store_true', help='If specified, use Perceptual Guidance or GGCL or GGDR')
+    parser.add_argument('--guide_type', type=str, default='pg',
+                        choices=['pg', 'ggcl', 'ggdr'], help='choose Perceptual Guidance or GGCL or GGDR')
     
     # Training configuration.
     parser.add_argument('--dataset', type=str, default='SIEMENS', choices=['SIEMENS', 'GE', 'Both'])
