@@ -1,3 +1,3 @@
-# CT Kernel Conversion Using Multi-Domain Image-To-Image Translation with Generator-Guided Contrastive Learning
+# KC-UNIT: Multi Kernel Conversion using Unpaired Image-to-Image Translation with Perceptual Guidance in Chest CT Imaging
 
-* Code will be updated soon
+* Code description will be updated soon
